@@ -1,0 +1,177 @@
+import React, {useState, useEffect} from 'react';
+import {MapContainer, TileLayer, Marker, Polyline, useMap} from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import {Box, Chip, Typography} from '@mui/material';
+import GpsFixedIcon from '@mui/icons-material/GpsFixed';
+
+// --- 图标定义 (这里我们在 className 里加了 CSS transition) ---
+// const droneIconSvg = `
+//   <svg width="46" height="46" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));">
+//     <path d="M12 2L15 8H9L12 2Z" fill="#ff5252"/>
+//     <rect x="2" y="8" width="20" height="4" rx="2" fill="#448aff"/>
+//     <path d="M4 12L2 16H6L4 12Z" fill="#212121"/>
+//     <path d="M20 12L18 16H22L20 12Z" fill="#212121"/>
+//     <circle cx="12" cy="10" r="2" fill="white"/>
+//   </svg>
+// `;
+
+const droneIcon = new L.Icon({
+    iconUrl: '/drone.png', // Vite 中，/ 直接指向 public 目录
+    iconSize: [40, 40],    // 图标大小，根据你的图片比例调整，比如 [40, 40] 或 [50, 50]
+    iconAnchor: [20, 20],  // 锚点：也就是图片的中心点 (通常是 iconSize 的一半)
+    className: 'drone-custom-icon' // ⚠️ 重点！这个类名一定要保留！
+});
+
+// --- 核心优化：智能视角控制器 ---
+// 作用：只有当无人机飞到屏幕边缘 10% 的区域时，才平滑移动地图
+const AutoPanController = ({position}: { position: L.LatLngTuple }) => {
+    const map = useMap();
+
+    useEffect(() => {
+        if (!position) return;
+
+        const [lat, lng] = position;
+        const bounds = map.getBounds();
+
+        // 如果无人机还在当前屏幕范围内，就不动地图（防止晃动）
+        // 为了体验更好，我们在屏幕边缘留出 5% 的缓冲 padding
+        // pad(0) 表示完全匹配屏幕，pad(-0.1) 表示缩小检测范围(内缩 10%)
+        const paddedBounds = bounds.pad(-0.1);
+
+        // 只有当坐标跑出这个“内缩框”时，才移动地图
+        if (!paddedBounds.contains([lat, lng])) {
+            // panTo 比 flyTo 更适合短距离平滑移动
+            map.panTo([lat, lng], {animate: true, duration: 0.5});
+        }
+    }, [position, map]);
+
+    return null;
+};
+
+const DroneMap: React.FC = () => {
+    // 初始坐标：成都市中心附近
+    const [position, setPosition] = useState<[number, number]>([30.6586, 104.0648]);
+
+    // --- 模拟无人机飞行 (轨迹稍微复杂点，画个"8"字) ---
+    useEffect(() => {
+        let angle = 0;
+        const timer = setInterval(() => {
+            angle += 0.05; // 每次增加的角度
+            const newLat = 30.6586 + Math.sin(angle) * 0.002;
+            const newLng = 104.0648 + Math.sin(angle * 2) * 0.004; // "8"字形轨迹
+            setPosition([newLat, newLng]);
+        }, 100); // 提高刷新率到 50ms (20fps) 测试丝滑度
+
+        return () => clearInterval(timer);
+    }, []);
+
+    // 计算十字线 (全屏延伸)
+    // 我们不需要每次重新计算巨大的数值，用 map bounds 更好，
+    // 但为了简单，这里直接画两条很长的线即可
+    const longRange = 1.0; // 这里的 1.0 经纬度跨度已经涵盖整个城市了
+    const verticalLine: [number, number][] = [
+        [position[0] - longRange, position[1]],
+        [position[0] + longRange, position[1]]
+    ];
+    const horizontalLine: [number, number][] = [
+        [position[0], position[1] - longRange],
+        [position[0], position[1] + longRange]
+    ];
+
+    return (
+        <Box sx={{width: '100%', height: '100%', position: 'relative', bgcolor: '#1e1e1e'}}>
+
+            <MapContainer
+                center={position}
+                zoom={17}
+                style={{height: '100%', width: '100%'}}
+                zoomControl={false}
+                scrollWheelZoom={true} // 允许滚轮缩放
+            >
+                {/* 使用更有科技感的 CartoDB Dark Matter 地图底图 (暗色模式) */}
+                {/* 如果你喜欢亮色，可以改回之前的 OSM */}
+                {/* 方案 A: 亮色 OSM */}
+                <TileLayer
+                    attribution='© OSM'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+
+                {/* 方案 B: 暗黑科技风 (推荐尝试，配合 MUI 很酷) */}
+
+                {/*<TileLayer*/}
+                {/*    attribution='© CartoDB'*/}
+                {/*    url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"*/}
+                {/*/>*/}
+
+
+                {/* 加载智能镜头控制器 */}
+                <AutoPanController position={position}/>
+
+                <Marker position={position} icon={droneIcon}/>
+
+                {/* 准星线：调低一点透明度，不抢眼 */}
+                <Polyline positions={horizontalLine}
+                          pathOptions={{color: '#ff1744', weight: 1, dashArray: '8, 8', opacity: 0.8}}/>
+                <Polyline positions={verticalLine}
+                          pathOptions={{color: '#2979ff', weight: 1, dashArray: '8, 8', opacity: 0.8}}/>
+
+            </MapContainer>
+
+            {/* 坐标悬浮窗 (已移动到右下角) */}
+            <Box
+                sx={{
+                    position: 'absolute',
+                    bottom: 30, // 距离底部 30px
+                    right: 30,  // 距离右侧 30px
+                    pointerEvents: 'none', // 鼠标穿透
+                    zIndex: 9999, // 确保浮在地图上层
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-end', // 让内容靠右对齐
+                    gap: 1, // 如果以后有多个数据，它们之间会有间距
+                }}
+            >
+                {/* 稍微加了一点点标题说明，更有仪表盘的感觉 */}
+                <Typography
+                    variant="caption"
+                    sx={{
+                        color: 'rgba(255,255,255,0.7)',
+                        fontSize: '0.7rem',
+                        mr: 1,
+                        fontFamily: 'monospace',
+                        textTransform: 'uppercase'
+                    }}
+                >
+                    Real-time Coordinates
+                </Typography>
+
+                <Chip
+                    icon={<GpsFixedIcon style={{color: '#00e676', fontSize: '1.2rem'}}/>}
+                    // 这里我对格式化做了一点微调，用 / 分割更像工程参数
+                    label={`${position[0].toFixed(6)} N / ${position[1].toFixed(6)} E`}
+                    sx={{
+                        height: 'auto', // 允许高度自适应
+                        padding: '8px 4px',
+                        backgroundColor: 'rgba(15, 23, 42, 0.85)', // 深蓝灰色背景，更现代
+                        color: '#00e676', // 荧光绿数据
+                        fontFamily: '"JetBrains Mono", Consolas, monospace', // 尽量用代码字体
+                        fontSize: '1rem',
+                        fontWeight: 600,
+                        letterSpacing: '0.5px', // 增加字间距
+                        boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)', // 玻璃拟态阴影
+                        backdropFilter: 'blur(8px)', // 毛玻璃效果
+                        border: '1px solid rgba(255, 255, 255, 0.1)', // 极细的边框
+                        borderRadius: '8px', //稍微方一点的圆角，不像之前那么圆
+                        '& .MuiChip-label': {
+                            paddingLeft: '8px',
+                            paddingRight: '12px'
+                        }
+                    }}
+                />
+            </Box>
+        </Box>
+    );
+};
+
+export default DroneMap;
