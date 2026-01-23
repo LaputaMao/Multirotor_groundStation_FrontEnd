@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {Box, Chip, Typography} from '@mui/material';
 import GpsFixedIcon from '@mui/icons-material/GpsFixed';
+import type {PanelRect} from "../App.tsx";
 
 // --- 图标定义 (这里我们在 className 里加了 CSS transition) ---
 // const droneIconSvg = `
@@ -25,31 +26,97 @@ const droneIcon = new L.Icon({
 
 // --- 核心优化：智能视角控制器 ---
 // 作用：只有当无人机飞到屏幕边缘 10% 的区域时，才平滑移动地图
-const AutoPanController = ({position}: { position: L.LatLngTuple }) => {
+// const AutoPanController = ({position}: { position: L.LatLngTuple }) => {
+//     const map = useMap();
+//
+//     useEffect(() => {
+//         if (!position) return;
+//
+//         const [lat, lng] = position;
+//         const bounds = map.getBounds();
+//
+//         // 如果无人机还在当前屏幕范围内，就不动地图（防止晃动）
+//         // 为了体验更好，我们在屏幕边缘留出 5% 的缓冲 padding
+//         // pad(0) 表示完全匹配屏幕，pad(-0.1) 表示缩小检测范围(内缩 10%)
+//         const paddedBounds = bounds.pad(-0.1);
+//
+//         // 只有当坐标跑出这个“内缩框”时，才移动地图
+//         if (!paddedBounds.contains([lat, lng])) {
+//             // panTo 比 flyTo 更适合短距离平滑移动
+//             map.panTo([lat, lng], {animate: true, duration: 0.5});
+//         }
+//     }, [position, map]);
+//
+//     return null;
+// };
+
+// --- 核心优化：基于遮挡检测的智能视角 ---
+const AutoPanController = ({
+                               position,
+                               blockers
+                           }: {
+    position: L.LatLngTuple,
+    blockers: PanelRect[]
+}) => {
     const map = useMap();
 
     useEffect(() => {
         if (!position) return;
 
-        const [lat, lng] = position;
-        const bounds = map.getBounds();
+        // 1. 将无人机经纬度转换为屏幕像素坐标 (x, y)
+        const dronePoint = map.latLngToContainerPoint(position);
 
-        // 如果无人机还在当前屏幕范围内，就不动地图（防止晃动）
-        // 为了体验更好，我们在屏幕边缘留出 5% 的缓冲 padding
-        // pad(0) 表示完全匹配屏幕，pad(-0.1) 表示缩小检测范围(内缩 10%)
-        const paddedBounds = bounds.pad(-0.1);
+        // 2. 检查是否被任何一个板子遮挡
+        // 我们定义一个 "Padding"，让飞机不贴着板子边缘
+        const padding = 50;
 
-        // 只有当坐标跑出这个“内缩框”时，才移动地图
-        if (!paddedBounds.contains([lat, lng])) {
-            // panTo 比 flyTo 更适合短距离平滑移动
-            map.panTo([lat, lng], {animate: true, duration: 0.5});
+        let isObscured = false;
+
+        // 遍历所有板子
+        for (const panel of blockers) {
+            // 简单的矩形碰撞检测
+            // 板子区域：Left, Right, Top, Bottom
+            const pLeft = panel.x;
+            const pRight = panel.x + panel.width;
+            const pTop = panel.y;
+            const pBottom = panel.y + panel.height;
+
+            // 无人机是否在板子内 (或者非常靠近板子)
+            if (
+                dronePoint.x > pLeft - padding &&
+                dronePoint.x < pRight + padding &&
+                dronePoint.y > pTop - padding &&
+                dronePoint.y < pBottom + padding
+            ) {
+                isObscured = true;
+                break; // 只要被其中一个挡住，就需要移动
+            }
         }
-    }, [position, map]);
+
+        // 3. 同时也检查是否飞出了屏幕边缘 (原逻辑保持)
+        const bounds = map.getBounds();
+        const paddedBounds = bounds.pad(-0.1); // 内缩 10%
+        const isOutOfScreen = !paddedBounds.contains(position);
+
+        // 4. 如果被挡住 OR 飞出屏幕，就移动地图
+        if (isObscured || isOutOfScreen) {
+            // 这里只是简单地把地图中心对准无人机
+            // 进阶做法是：计算出一个"不被遮挡的最佳可视为位置"，但 panTo(position) 已经足够解决问题
+            map.panTo(position, {animate: true, duration: 0.8});
+        }
+
+    }, [position, map, blockers]); // 监听 blockers 变化！
 
     return null;
 };
 
-const DroneMap: React.FC = () => {
+// ... (DroneMap 主组件，需接收 blockers props) ...
+
+interface DroneMapProps {
+    blockers: PanelRect[];
+}
+
+const DroneMap: React.FC<DroneMapProps> = ({blockers}) => {
     // 初始坐标：成都市中心附近
     const [position, setPosition] = useState<[number, number]>([30.6586, 104.0648]);
 
@@ -105,8 +172,8 @@ const DroneMap: React.FC = () => {
                 {/*/>*/}
 
 
-                {/* 加载智能镜头控制器 */}
-                <AutoPanController position={position}/>
+                {/* 将 blockers 传给控制器 */}
+                <AutoPanController position={position} blockers={blockers}/>
 
                 <Marker position={position} icon={droneIcon}/>
 
