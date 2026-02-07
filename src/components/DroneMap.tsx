@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, {useEffect} from 'react';
 import {MapContainer, TileLayer, Marker, Polyline, useMap} from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -6,49 +6,12 @@ import {Box, Chip, Typography} from '@mui/material';
 import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import type {PanelRect} from "../App.tsx";
 
-// --- 图标定义 (这里我们在 className 里加了 CSS transition) ---
-// const droneIconSvg = `
-//   <svg width="46" height="46" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));">
-//     <path d="M12 2L15 8H9L12 2Z" fill="#ff5252"/>
-//     <rect x="2" y="8" width="20" height="4" rx="2" fill="#448aff"/>
-//     <path d="M4 12L2 16H6L4 12Z" fill="#212121"/>
-//     <path d="M20 12L18 16H22L20 12Z" fill="#212121"/>
-//     <circle cx="12" cy="10" r="2" fill="white"/>
-//   </svg>
-// `;
-
 const droneIcon = new L.Icon({
     iconUrl: '/drone.png', // Vite 中，/ 直接指向 public 目录
     iconSize: [40, 40],    // 图标大小，根据你的图片比例调整，比如 [40, 40] 或 [50, 50]
     iconAnchor: [20, 20],  // 锚点：也就是图片的中心点 (通常是 iconSize 的一半)
     className: 'drone-custom-icon' // ⚠️ 重点！这个类名一定要保留！
 });
-
-// --- 核心优化：智能视角控制器 ---
-// 作用：只有当无人机飞到屏幕边缘 10% 的区域时，才平滑移动地图
-// const AutoPanController = ({position}: { position: L.LatLngTuple }) => {
-//     const map = useMap();
-//
-//     useEffect(() => {
-//         if (!position) return;
-//
-//         const [lat, lng] = position;
-//         const bounds = map.getBounds();
-//
-//         // 如果无人机还在当前屏幕范围内，就不动地图（防止晃动）
-//         // 为了体验更好，我们在屏幕边缘留出 5% 的缓冲 padding
-//         // pad(0) 表示完全匹配屏幕，pad(-0.1) 表示缩小检测范围(内缩 10%)
-//         const paddedBounds = bounds.pad(-0.1);
-//
-//         // 只有当坐标跑出这个“内缩框”时，才移动地图
-//         if (!paddedBounds.contains([lat, lng])) {
-//             // panTo 比 flyTo 更适合短距离平滑移动
-//             map.panTo([lat, lng], {animate: true, duration: 0.5});
-//         }
-//     }, [position, map]);
-//
-//     return null;
-// };
 
 // --- 核心优化：基于遮挡检测的智能视角 ---
 const AutoPanController = ({
@@ -114,24 +77,26 @@ const AutoPanController = ({
 
 interface DroneMapProps {
     blockers: PanelRect[];
+    realTimePosition: [number, number] | null; // <--- 新增 Prop
 }
 
-const DroneMap: React.FC<DroneMapProps> = ({blockers}) => {
+const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition}) => {
     // 初始坐标：成都市中心附近
-    const [position, setPosition] = useState<[number, number]>([30.6586, 104.0648]);
-
+    // const [position, setPosition] = useState<[number, number]>([30.6586, 104.0648]);
+    const defaultPos: [number, number] = [30.6586, 104.0648];
+    const position = realTimePosition || defaultPos;
     // --- 模拟无人机飞行 (轨迹稍微复杂点，画个"8"字) ---
-    useEffect(() => {
-        let angle = 0;
-        const timer = setInterval(() => {
-            angle += 0.05; // 每次增加的角度
-            const newLat = 30.6586 + Math.sin(angle) * 0.002;
-            const newLng = 104.0648 + Math.sin(angle * 2) * 0.004; // "8"字形轨迹
-            setPosition([newLat, newLng]);
-        }, 100); // 提高刷新率到 50ms (20fps) 测试丝滑度
-
-        return () => clearInterval(timer);
-    }, []);
+    // useEffect(() => {
+    //     let angle = 0;
+    //     const timer = setInterval(() => {
+    //         angle += 0.05; // 每次增加的角度
+    //         const newLat = 30.6586 + Math.sin(angle) * 0.002;
+    //         const newLng = 104.0648 + Math.sin(angle * 2) * 0.004; // "8"字形轨迹
+    //         setPosition([newLat, newLng]);
+    //     }, 100); // 提高刷新率到 50ms (20fps) 测试丝滑度
+    //
+    //     return () => clearInterval(timer);
+    // }, []);
 
     // 计算十字线 (全屏延伸)
     // 我们不需要每次重新计算巨大的数值，用 map bounds 更好，
@@ -150,7 +115,7 @@ const DroneMap: React.FC<DroneMapProps> = ({blockers}) => {
         <Box sx={{width: '100%', height: '100%', position: 'relative', bgcolor: '#1e1e1e'}}>
 
             <MapContainer
-                center={position}
+                center={defaultPos}
                 zoom={17}
                 style={{height: '100%', width: '100%'}}
                 zoomControl={false}
@@ -174,8 +139,8 @@ const DroneMap: React.FC<DroneMapProps> = ({blockers}) => {
 
                 {/* 将 blockers 传给控制器 */}
                 <AutoPanController position={position} blockers={blockers}/>
-
-                <Marker position={position} icon={droneIcon}/>
+                {realTimePosition && <Marker position={realTimePosition} icon={droneIcon} />}
+                {/*<Marker position={position} icon={droneIcon}/>*/}
 
                 {/* 准星线：调低一点透明度，不抢眼 */}
                 <Polyline positions={horizontalLine}
