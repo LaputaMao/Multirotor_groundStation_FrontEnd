@@ -1,33 +1,40 @@
 import {useState, useEffect} from 'react';
-import {Box, Typography, Paper, Fade} from '@mui/material';
+import {Box, Typography, Paper, Fade, CircularProgress} from '@mui/material';
 // 引入图标
 import WbSunnyIcon from '@mui/icons-material/WbSunny';       // 晴天
 import CloudIcon from '@mui/icons-material/Cloud';           // 雾/多云
 import GrainIcon from '@mui/icons-material/Grain';           // 小雨
 import ThunderstormIcon from '@mui/icons-material/Thunderstorm'; // 大雨/雷暴
+import {
+    fetchLocationName,
+    fetchWeatherForecast,
+    type WeatherDaily,
+    type LocationInfo
+} from '../services/weatherService';
+import PlaceIcon from '@mui/icons-material/Place'; // 地点图标
 
 // --- 模拟数据生成工具 ---
-const generateWeekWeather = () => {
-    const types = ['sunny', 'foggy', 'light_rain', 'heavy_rain'] as const;
-    const days = [];
-    const today = new Date();
-
-    for (let i = 0; i < 7; i++) {
-        const d = new Date(today);
-        d.setDate(today.getDate() + i);
-
-        // 简单模拟：轮流展示不同天气，方便你看效果
-        const type = types[i % 4];
-
-        days.push({
-            dateStr: `${d.getMonth() + 1}月${d.getDate()}日`,
-            dayName: i === 0 ? '今天' : i === 1 ? '明天' : ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()],
-            type: type,
-            temp: 20 + Math.floor(Math.random() * 10) // 随机温度
-        });
-    }
-    return days;
-};
+// const generateWeekWeather = () => {
+//     const types = ['sunny', 'foggy', 'light_rain', 'heavy_rain'] as const;
+//     const days = [];
+//     const today = new Date();
+//
+//     for (let i = 0; i < 7; i++) {
+//         const d = new Date(today);
+//         d.setDate(today.getDate() + i);
+//
+//         // 简单模拟：轮流展示不同天气，方便你看效果
+//         const type = types[i % 4];
+//
+//         days.push({
+//             dateStr: `${d.getMonth() + 1}月${d.getDate()}日`,
+//             dayName: i === 0 ? '今天' : i === 1 ? '明天' : ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()],
+//             type: type,
+//             temp: 20 + Math.floor(Math.random() * 10) // 随机温度
+//         });
+//     }
+//     return days;
+// };
 
 // --- 样式配置中心 (核心视觉效果) ---
 const weatherStyles: Record<string, any> = {
@@ -66,117 +73,120 @@ const weatherStyles: Record<string, any> = {
     }
 };
 
-const TopBar = () => {
-    // 1. 时间状态
-    const [currentTime, setCurrentTime] = useState(new Date());
-    // 2. 天气数据状态
-    const [forecast, setForecast] = useState<any[]>([]);
+interface TopBarProps {
+    currentGps: { lat: number, lon: number } | null;
+}
 
+const TopBar: React.FC<TopBarProps> = ({currentGps}) => {
+    const [currentTime, setCurrentTime] = useState(new Date());
+    const [forecast, setForecast] = useState<WeatherDaily[]>([]);
+    const [location, setLocation] = useState<LocationInfo>({city: 'Waiting...', district: ''});
+    const [hasFetched, setHasFetched] = useState(false); // 锁机制：防止重复请求
+
+    // 1. 时钟
     useEffect(() => {
-        // 启动时钟
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-        // 加载模拟天气
-        setForecast(generateWeekWeather());
         return () => clearInterval(timer);
     }, []);
 
-    // 格式化时间 HH:mm:ss
+    // 2. 核心逻辑：监听 GPS 变化，只请求一次
+    useEffect(() => {
+        const initWeather = async () => {
+            if (currentGps && !hasFetched && currentGps.lat !== 0) {
+                console.log("Fetching weather for:", currentGps);
+                setHasFetched(true); // 立即上锁
+
+                // 并行请求：查名字 + 查天气
+                const [locData, weatherData] = await Promise.all([
+                    fetchLocationName(currentGps.lat, currentGps.lon),
+                    fetchWeatherForecast(currentGps.lat, currentGps.lon)
+                ]);
+
+                setLocation(locData);
+                setForecast(weatherData);
+            }
+        };
+
+        initWeather();
+    }, [currentGps, hasFetched]);
+
     const timeString = currentTime.toLocaleTimeString('zh-CN', {hour12: false});
 
     return (
         <Box
             sx={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '140px', // 区域高度
-                zIndex: 1100, // 稍微比悬浮板低一点，或者一样高
-                pointerEvents: 'none', // 关键！让鼠标穿透透明区域，不影响操作地图
-                // 背景：由上到下，从黑(0.9)渐变到全透明
+                position: 'absolute', top: 0, left: 0, width: '100%', height: '140px',
+                zIndex: 1100, pointerEvents: 'none',
                 background: 'linear-gradient(to bottom, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.6) 40%, rgba(0,0,0,0) 100%)',
-                display: 'flex',
-                alignItems: 'flex-start', // 内容靠上
-                padding: '20px 40px',
+                display: 'flex', alignItems: 'flex-start', padding: '20px 40px',
             }}
         >
-            {/* 左侧：巨大的时间显示 */}
-            <Box sx={{
-                color: '#fff',
-                minWidth: '180px',
-                textShadow: '0 0 20px rgba(0,255,118,0.6)', // 赛博朋克荧光绿光晕
-                mt: 1
-            }}>
+            {/* 左侧：时间 + 地点 */}
+            <Box sx={{color: '#fff', minWidth: '220px', textShadow: '0 0 20px rgba(0,255,118,0.6)', mt: 1}}>
                 <Typography variant="h3" sx={{fontWeight: 'bold', fontFamily: 'monospace', letterSpacing: -2}}>
                     {timeString}
                 </Typography>
-                <Typography variant="subtitle1" sx={{opacity: 0.8, pl: 1}}>
-                    {currentTime.toLocaleDateString()}
-                </Typography>
+
+                {/* 显示地点 - 带有地标图标 */}
+                <Box sx={{display: 'flex', alignItems: 'center', opacity: 0.9, pl: 0.5, mt: 0.5}}>
+                    <PlaceIcon sx={{fontSize: 18, mr: 0.5, color: '#00e676'}}/>
+                    <Typography variant="subtitle1" component="span" sx={{fontWeight: 'bold'}}>
+                        {location.district ? `${location.city} · ${location.district}` : location.city}
+                    </Typography>
+                </Box>
             </Box>
 
-            {/* 右侧：天气列表 Scrollview */}
+            {/* 右侧：天气列表 + Loading 状态 */}
             <Box sx={{
-                flex: 1,
-                display: 'flex',
-                gap: 2,
-                overflowX: 'auto', // 允许横向滚动（虽然我们有7个，屏幕大可能一排显示完）
-                pb: 2, // 预留阴影空间
-                pl: 4,
-                scrollbarWidth: 'none', // 隐藏滚动条 (Firefox)
-                '&::-webkit-scrollbar': {display: 'none'}, // 隐藏滚动条 (Chrome)
-                pointerEvents: 'auto' // 恢复子元素的鼠标事件
+                flex: 1, display: 'flex', gap: 2, overflowX: 'auto', pb: 2, pl: 4,
+                scrollbarWidth: 'none', '&::-webkit-scrollbar': {display: 'none'}, pointerEvents: 'auto'
             }}>
-                {forecast.map((day, index) => {
-                    const style = weatherStyles[day.type];
-
-                    return (
-                        <Fade in={true} timeout={500 + index * 100} key={index}>
-                            <Paper
-                                elevation={0}
-                                sx={{
-                                    minWidth: 100,
-                                    height: 110,
-                                    borderRadius: 4,
-                                    color: '#fff',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    transition: 'transform 0.3s ease',
-                                    cursor: 'pointer',
-
-                                    // 应用动态样式
-                                    background: style.bg,
-                                    boxShadow: style.shadow,
-                                    border: style.border,
-
-                                    '&:hover': {
-                                        transform: 'translateY(5px) scale(1.05)', // 悬浮交互
-                                    }
-                                }}
-                            >
-                                <Typography variant="caption" sx={{opacity: 0.9, fontWeight: 'bold'}}>
-                                    {day.dateStr}
-                                </Typography>
-                                <Typography variant="caption" sx={{mb: 1, opacity: 0.7}}>
-                                    {day.dayName}
-                                </Typography>
-
-                                {/* 图标容器，稍微放大一点 */}
-                                <Box sx={{transform: 'scale(1.5)', my: 1}}>
-                                    {style.icon}
-                                </Box>
-
-                                <Box sx={{display: 'flex', alignItems: 'center', mt: 0.5}}>
-                                    <Typography variant="body2" fontWeight="bold">
-                                        {day.temp}°C
-                                    </Typography>
-                                </Box>
-                            </Paper>
-                        </Fade>
-                    );
-                })}
+                {forecast.length === 0 ? (
+                    // 加载中显示的骨架屏或者 loading
+                    <Box sx={{color: 'white', display: 'flex', alignItems: 'center', gap: 2, opacity: 0.5}}>
+                        <CircularProgress size={20} color="inherit"/>
+                        <Typography variant="body2">Acquiring Local Atmosphere Data...</Typography>
+                    </Box>
+                ) : (
+                    forecast.map((day, index) => {
+                        const style = weatherStyles[day.type];
+                        return (
+                            <Fade in={true} timeout={500 + index * 100} key={index}>
+                                <Paper
+                                    elevation={0}
+                                    sx={{
+                                        minWidth: 80,
+                                        height: 80,
+                                        borderRadius: 10,
+                                        color: '#fff',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        transition: 'transform 0.3s ease',
+                                        cursor: 'pointer',
+                                        background: style.bg,
+                                        boxShadow: style.shadow,
+                                        border: style.border,
+                                        '&:hover': {transform: 'translateY(5px) scale(1.05)'}
+                                    }}
+                                >
+                                    <Typography variant="caption"
+                                                sx={{opacity: 0.9, fontWeight: 'bold'}}>{day.dateStr}</Typography>
+                                    <Typography variant="caption" sx={{mb: 1, opacity: 0.7}}>{day.dayName}</Typography>
+                                    {/* 图标 */}
+                                    <Box sx={{transform: 'scale(1.5)', my: 1}}>{style.icon}</Box>
+                                    {/* 温度区间 */}
+                                    <Box sx={{display: 'flex', alignItems: 'center', mt: 0.5}}>
+                                        <Typography variant="body2" fontWeight="bold">
+                                            {day.tempMin}° / {day.tempMax}°
+                                        </Typography>
+                                    </Box>
+                                </Paper>
+                            </Fade>
+                        );
+                    })
+                )}
             </Box>
         </Box>
     );

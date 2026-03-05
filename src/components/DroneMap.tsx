@@ -1,8 +1,10 @@
-import React, {useEffect} from 'react';
+import React, {useEffect, useState} from 'react';
 import {MapContainer, TileLayer, Marker, Polyline, useMap} from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import {Box, Chip, Typography} from '@mui/material';
+import {Box, Button, ButtonGroup, Chip, Tooltip, Typography} from '@mui/material';
+import MapIcon from '@mui/icons-material/Map';
+import SatelliteIcon from '@mui/icons-material/Satellite';
 import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import type {PanelRect} from "../App.tsx";
 
@@ -85,18 +87,30 @@ const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition}) => {
     // const [position, setPosition] = useState<[number, number]>([30.6586, 104.0648]);
     const defaultPos: [number, number] = [30.6586, 104.0648];
     const position = realTimePosition || defaultPos;
-    // --- 模拟无人机飞行 (轨迹稍微复杂点，画个"8"字) ---
-    // useEffect(() => {
-    //     let angle = 0;
-    //     const timer = setInterval(() => {
-    //         angle += 0.05; // 每次增加的角度
-    //         const newLat = 30.6586 + Math.sin(angle) * 0.002;
-    //         const newLng = 104.0648 + Math.sin(angle * 2) * 0.004; // "8"字形轨迹
-    //         setPosition([newLat, newLng]);
-    //     }, 100); // 提高刷新率到 50ms (20fps) 测试丝滑度
-    //
-    //     return () => clearInterval(timer);
-    // }, []);
+
+    // --- 新增功能 1: 历史轨迹状态 ---
+    // pathHistory 是一个坐标数组 [[lat, lon], [lat, lon], ...]
+    const [pathHistory, setPathHistory] = useState<[number, number][]>([]);
+
+    // --- 新增功能 2: 地图底图类型 ---
+    // 'dark' = 街道夜间模式 (CartoDB)
+    // 'satellite' = 卫星影像 (Esri / Google)
+    const [mapType, setMapType] = useState<'light' | 'satellite'>('satellite');
+
+    // 当收到新坐标时，加入历史记录
+    useEffect(() => {
+        if (realTimePosition) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setPathHistory(prev => {
+                // 简单的去重逻辑：如果无人机没动，不要重复加点
+                const lastPoint = prev[prev.length - 1];
+                if (lastPoint && lastPoint[0] === realTimePosition[0] && lastPoint[1] === realTimePosition[1]) {
+                    return prev;
+                }
+                return [...prev, realTimePosition];
+            });
+        }
+    }, [realTimePosition]);
 
     // 计算十字线 (全屏延伸)
     // 我们不需要每次重新计算巨大的数值，用 map bounds 更好，
@@ -121,26 +135,44 @@ const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition}) => {
                 zoomControl={false}
                 scrollWheelZoom={true} // 允许滚轮缩放
             >
-                {/* 使用更有科技感的 CartoDB Dark Matter 地图底图 (暗色模式) */}
-                {/* 如果你喜欢亮色，可以改回之前的 OSM */}
-                {/* 方案 A: 亮色 OSM */}
-                <TileLayer
-                    attribution='© OSM'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
 
-                {/* 方案 B: 暗黑科技风 (推荐尝试，配合 MUI 很酷) */}
-
-                {/*<TileLayer*/}
-                {/*    attribution='© CartoDB'*/}
-                {/*    url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"*/}
-                {/*/>*/}
-
+                {/*
+            动态切换底图
+            key={mapType} 是必须的！这迫使 Leaflet 重新渲染图层，避免瓦片混合
+         */}
+                {mapType === 'light' ? (
+                    <TileLayer
+                        key="light"
+                        attribution='© CartoDB'
+                        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                    />
+                ) : (
+                    <TileLayer
+                        key="satellite"
+                        attribution='© Esri'
+                        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    />
+                )}
 
                 {/* 将 blockers 传给控制器 */}
                 <AutoPanController position={position} blockers={blockers}/>
-                {realTimePosition && <Marker position={realTimePosition} icon={droneIcon} />}
+                {realTimePosition && <Marker position={realTimePosition} icon={droneIcon}/>}
                 {/*<Marker position={position} icon={droneIcon}/>*/}
+
+                {/* --- 绘制轨迹线 --- */}
+                {pathHistory.length > 1 && (
+                    <Polyline
+                        positions={pathHistory}
+                        pathOptions={{
+                            color: '#ffd700',   // 黄色
+                            weight: 3,          // 线条粗细
+                            opacity: 0.8,
+                            dashArray: '10, 10' // 点状/虚线效果 (10px实线, 10px空白)
+                        }}
+                    />
+                )}
+
+                <Marker position={position} icon={droneIcon}/>
 
                 {/* 准星线：调低一点透明度，不抢眼 */}
                 <Polyline positions={horizontalLine}
@@ -149,6 +181,40 @@ const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition}) => {
                           pathOptions={{color: '#2979ff', weight: 1, dashArray: '8, 8', opacity: 0.8}}/>
 
             </MapContainer>
+
+            {/* --- 地图切换悬浮按钮组 --- */}
+            <Box sx={{
+                position: 'absolute',
+                top: 150, // 躲开左上角的 time panel 和 smart panel
+                right: 20,
+                zIndex: 1000,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 1
+            }}>
+                <ButtonGroup orientation="vertical" variant="contained" sx={{
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    backdropFilter: 'blur(5px)',
+                    border: '1px solid rgba(255,255,255,0.2)'
+                }}>
+                    <Tooltip title="Street Map" placement="left">
+                        <Button
+                            onClick={() => setMapType('light')}
+                            sx={{color: mapType === 'light' ? '#00e676' : '#aaa'}}
+                        >
+                            <MapIcon/>
+                        </Button>
+                    </Tooltip>
+                    <Tooltip title="Satellite Mode" placement="left">
+                        <Button
+                            onClick={() => setMapType('satellite')}
+                            sx={{color: mapType === 'satellite' ? '#00e676' : '#aaa'}}
+                        >
+                            <SatelliteIcon/>
+                        </Button>
+                    </Tooltip>
+                </ButtonGroup>
+            </Box>
 
             {/* 坐标悬浮窗 (已移动到右下角) */}
             <Box
@@ -203,6 +269,7 @@ const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition}) => {
                 />
             </Box>
         </Box>
+
     );
 };
 

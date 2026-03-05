@@ -38,6 +38,21 @@ export interface MissionCreateResult {
     status: string;
 }
 
+// 4. 任务列表相关的类型
+export interface MissionListItem {
+    id: number;
+    name: string;
+    location: string | null;
+    created_at: string;
+    updated_at: string | null;
+    finished_at: string | null;
+}
+
+export interface MissionListResponse {
+    total: number;
+    items: MissionListItem[];
+}
+
 // --- API 方法封装 ---
 
 // 通用的 Fetch 包装器
@@ -69,4 +84,11 @@ export const cancelResume = async () => {
 // 3. 新建任务
 export const createMission = async (data: MissionCreateRequest) => {
     return request<MissionCreateResult>('/create', 'POST', data);
+};
+
+// 4. 获取任务列表 (分页)
+export const getMissionList = async (page: number = 1, size: number = 10) => {
+    //构建 query string
+    const query = `?page=${page}&size=${size}`;
+    return request<MissionListResponse>(`/list${query}`, 'GET');
 };
