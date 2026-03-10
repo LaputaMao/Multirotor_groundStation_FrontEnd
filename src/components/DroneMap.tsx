@@ -1,5 +1,5 @@
 import React, {useEffect, useState} from 'react';
-import {MapContainer, TileLayer, Marker, Polyline, useMap} from 'react-leaflet';
+import {MapContainer, TileLayer, Marker, Polyline, useMap, GeoJSON} from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {Box, Button, ButtonGroup, Chip, Tooltip, Typography} from '@mui/material';
@@ -75,17 +75,38 @@ const AutoPanController = ({
     return null;
 };
 
+// === 新增：一个隐形组件，专门用于在 GeoJSON 数据改变时调整地图视野 ===
+const GeoJsonFitter = ({data}: { data: never }) => {
+    const map = useMap();
+
+    useEffect(() => {
+        if (data) {
+            // 利用 Leaflet 原生方法计算 GeoJSON 的边界 (Bounding Box)
+            const geoJsonLayer = L.geoJSON(data);
+            const bounds = geoJsonLayer.getBounds();
+
+            if (bounds.isValid()) {
+                // padding 确保图形不会紧紧贴在屏幕边缘，留出 50px 空隙
+                map.flyToBounds(bounds, {padding: [50, 50], duration: 1.5});
+            }
+        }
+    }, [data, map]);
+
+    return null; // 不需要渲染任何 DOM
+};
+
 // ... (DroneMap 主组件，需接收 blockers props) ...
 
 interface DroneMapProps {
     blockers: PanelRect[];
     realTimePosition: [number, number] | null; // <--- 新增 Prop
+    missionAreaGeoJson?: never; // 新增：接收任务区域数据
 }
 
-const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition}) => {
+const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition, missionAreaGeoJson}) => {
     // 初始坐标：成都市中心附近
     // const [position, setPosition] = useState<[number, number]>([30.6586, 104.0648]);
-    const defaultPos: [number, number] = [30.6586, 104.0648];
+    const defaultPos: [number, number] = [36.1411964, 120.1003234];
     const position = realTimePosition || defaultPos;
 
     // --- 新增功能 1: 历史轨迹状态 ---
@@ -131,6 +152,7 @@ const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition}) => {
             <MapContainer
                 center={defaultPos}
                 zoom={17}
+                maxZoom={22}
                 style={{height: '100%', width: '100%'}}
                 zoomControl={false}
                 scrollWheelZoom={true} // 允许滚轮缩放
@@ -145,12 +167,16 @@ const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition}) => {
                         key="light"
                         attribution='© CartoDB'
                         url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                        maxZoom={22}         // 2. 允许拉伸的最大级别
+                        maxNativeZoom={19}   // 3. 告诉Leaflet，这个图源原生只到19级，剩下的你帮我用CSS拉伸
                     />
                 ) : (
                     <TileLayer
                         key="satellite"
                         attribution='© Esri'
                         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                        maxZoom={22}         // 2. 允许拉伸的最大级别
+                        maxNativeZoom={19}   // 3. 告诉Leaflet，这个图源原生只到19级，剩下的你帮我用CSS拉伸
                     />
                 )}
 
@@ -164,21 +190,45 @@ const DroneMap: React.FC<DroneMapProps> = ({blockers, realTimePosition}) => {
                     <Polyline
                         positions={pathHistory}
                         pathOptions={{
-                            color: '#ffd700',   // 黄色
+                            color: '#fff581',   // 黄色
                             weight: 3,          // 线条粗细
-                            opacity: 0.8,
+                            opacity: 1.0,
                             dashArray: '10, 10' // 点状/虚线效果 (10px实线, 10px空白)
                         }}
                     />
                 )}
 
+                {/* --- 渲染选中的任务区域 --- */}
+                {missionAreaGeoJson && (
+                    <>
+                        {/*
+                    给 GeoJSON 组件加 key 极其关键！
+                    由于 react-leaflet 的设计原则，只有 key 改变时它才会真正销毁重建 DOM 以更新新数据，否则会残留以前的图形
+                */}
+                        <GeoJSON
+                            key={JSON.stringify(missionAreaGeoJson)} // 用数据内容做 key，保证每次新数据渲染新的图层
+                            data={missionAreaGeoJson}
+                            pathOptions={{
+                                color: '#00bfff',      // 亮蓝色边框
+                                weight: 1,             // 细线
+                                opacity: 0.7,
+                                fillColor: '#00008b',  // 深蓝色填充
+                                fillOpacity: 0.2     // 较高透明度
+                            }}
+                        />
+                        {/* 触发展开视野动画 */}
+                        <GeoJsonFitter data={missionAreaGeoJson}/>
+                    </>
+                )}
+
+
                 <Marker position={position} icon={droneIcon}/>
 
                 {/* 准星线：调低一点透明度，不抢眼 */}
                 <Polyline positions={horizontalLine}
-                          pathOptions={{color: '#ff1744', weight: 1, dashArray: '8, 8', opacity: 0.8}}/>
+                          pathOptions={{color: '#9af34c', weight: 1.5, dashArray: '8, 8', opacity: 0.8}}/>
                 <Polyline positions={verticalLine}
-                          pathOptions={{color: '#2979ff', weight: 1, dashArray: '8, 8', opacity: 0.8}}/>
+                          pathOptions={{color: '#a6ea64', weight: 1.5, dashArray: '8, 8', opacity: 0.8}}/>
 
             </MapContainer>
 

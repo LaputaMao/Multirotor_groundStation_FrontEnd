@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
     Box, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
     IconButton, CircularProgress, Pagination
@@ -8,12 +8,17 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import {getMissionList, type MissionListItem} from '../services/api';
 
-const MissionListPanel = () => {
+interface MissionListPanelProps {
+    selectedId: number | null;
+    onSelect: (id: number) => void;
+}
+
+const MissionListPanel: React.FC<MissionListPanelProps> = ({selectedId, onSelect}) => {
     const [missions, setMissions] = useState<MissionListItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
-    const pageSize = 5; // 每页显示5条，避免面板太长
+    const pageSize = 5;
 
     const fetchMissions = async () => {
         setLoading(true);
@@ -83,22 +88,40 @@ const MissionListPanel = () => {
                                 <TableCell colSpan={4} align="center" sx={{py: 4}}><CircularProgress
                                     size={20}/></TableCell>
                             </TableRow>
-                        ) : missions.map((row) => (
-                            <TableRow key={row.id} hover sx={{'&:last-child td, &:last-child th': {border: 0}}}>
-                                <TableCell sx={{color: 'white', fontFamily: 'monospace'}}>#{row.id}</TableCell>
-                                <TableCell sx={{color: 'white'}}>{row.name}</TableCell>
-                                <TableCell align="right" sx={{
-                                    color: '#aaa',
-                                    fontSize: '0.75rem'
-                                }}>{formatDate(row.created_at)}</TableCell>
-                                <TableCell align="center">
-                                    {row.finished_at ?
-                                        <CheckCircleOutlineIcon sx={{fontSize: 16, color: '#00e676'}}/> :
-                                        <RadioButtonUncheckedIcon sx={{fontSize: 16, color: '#aaa'}}/>
-                                    }
-                                </TableCell>
-                            </TableRow>
-                        ))}
+                        ) : missions.map((row) => {
+                            const isSelected = selectedId === row.id;
+                            return (
+                                <TableRow
+                                    key={row.id}
+                                    hover
+                                    onClick={() => onSelect(row.id)}
+                                    sx={{
+                                        cursor: 'pointer',
+                                        // 选中状态下的高亮背景色和左侧边框提示
+                                        bgcolor: isSelected ? 'rgba(0, 191, 255, 0.15)' : 'transparent',
+                                        borderLeft: isSelected ? '3px solid #00bfff' : '3px solid transparent',
+                                        transition: 'all 0.2s',
+                                        '&:last-child td, &:last-child th': {borderBottom: 0}
+                                    }}
+                                >
+                                    <TableCell sx={{
+                                        color: isSelected ? '#00bfff' : 'white',
+                                        fontFamily: 'monospace'
+                                    }}>#{row.id}</TableCell>
+                                    <TableCell sx={{color: 'white'}}>{row.name}</TableCell>
+                                    <TableCell align="right" sx={{
+                                        color: '#aaa',
+                                        fontSize: '0.75rem'
+                                    }}>{formatDate(row.created_at)}</TableCell>
+                                    <TableCell align="center">
+                                        {row.finished_at ?
+                                            <CheckCircleOutlineIcon sx={{fontSize: 16, color: '#00e676'}}/> :
+                                            <RadioButtonUncheckedIcon sx={{fontSize: 16, color: '#aaa'}}/>
+                                        }
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
                     </TableBody>
                 </Table>
             </TableContainer>

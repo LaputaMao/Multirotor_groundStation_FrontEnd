@@ -19,7 +19,7 @@ import ListAltIcon from '@mui/icons-material/ListAlt';     // 列表图标
 import StatusDashboard, {type DroneTelemetry} from './components/StatusDashboard';
 import MissionListPanel from './components/MissionListPanel';
 // --- API 与 类型 ---
-import {WS_URL, resumeMission, cancelResume} from './services/api';
+import {WS_URL, resumeMission, cancelResume, getMissionGeoJson} from './services/api';
 
 // 定义面板位置/大小类型
 export interface PanelRect {
@@ -60,6 +60,24 @@ function App() {
         ? {lat: telemetry.lat, lon: telemetry.lon}
         : null;
 
+    // 动态获取当前窗口尺寸，计算四个角的安全坐标
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    // 预留边距
+    const paddingX = 20;
+    // 顶部要躲开 TopBar (大约 140px)
+    const paddingTop = 130;
+    // 底部也要留空隙
+    const paddingBottom = 20;
+    // 坐标分配计划 (假设各个面板的近似宽高)
+    const posTopLeft = {x: paddingX, y: paddingTop};
+    // 右上：宽度约 340，减去宽度和边距
+    const posTopRight = {x: W - 320 - paddingX, y: paddingTop - 120};
+    // 左下：高度约 340，减去高度和边距
+    const posBottomLeft = {x: paddingX, y: H - 305 - paddingBottom};
+    // 右下：宽度约 420，高度约 380
+    const posBottomRight = {x: W - 320 - paddingX, y: H - 390 - paddingBottom};
+
     // 悬浮板遮挡区域 (给地图避让算法用)
     const [panelBlockers, setPanelBlockers] = useState<PanelRect[]>([]);
 
@@ -68,6 +86,10 @@ function App() {
 
     // 定义 MJPEG 流地址 (假设后端在 localhost:7007)
     const VIDEO_STREAM_URL = "http://localhost:7007/api/missions/video_feed";
+
+    // --- 选择任务与 GeoJSON 状态 ---
+    const [selectedMissionId, setSelectedMissionId] = useState<number | null>(null);
+    const [missionArea, setMissionArea] = useState<never>(null); // 保存 GeoJSON 数据
 
     // WebSocket 引用 (避免重复连接)
     const wsRef = useRef<WebSocket | null>(null);
@@ -166,6 +188,22 @@ function App() {
         }
     };
 
+    // --- 新增：处理点击任务行的业务逻辑 ---
+    const handleSelectMission = async (id: number) => {
+        // 避免重复点击相同的导致动画重放
+        if (id === selectedMissionId) return;
+
+        setSelectedMissionId(id);
+        try {
+            const geoData = await getMissionGeoJson(id);
+            setMissionArea(geoData);
+        } catch (error) {
+            console.error("Fetch geojson error:", error);
+            // 如果获取失败，可以清空或者给个提示框
+            setMissionArea(null);
+        }
+    };
+
     return (
         <Box sx={{
             position: 'relative',
@@ -182,6 +220,7 @@ function App() {
                 <DroneMap
                     blockers={panelBlockers}
                     realTimePosition={dronePosition}
+                    missionAreaGeoJson={missionArea}
                 />
             </Box>
 
@@ -196,7 +235,7 @@ function App() {
                 id="video-panel"
                 title={`CAMERA [${telemetry.status.toUpperCase()}]`}
                 icon={<VideocamIcon/>}
-                initialPosition={{x: 50, y: 160}}
+                initialPosition={posTopLeft}           // 使用计算好的左上角
                 onLayoutChange={handlePanelUpdate}
             >
                 <Box sx={{
@@ -282,7 +321,7 @@ function App() {
                 id="control-panel"
                 title="MISSION CONTROL"
                 icon={<AddToPhotosIcon/>}
-                initialPosition={{x: 50, y: 460}}
+                initialPosition={posBottomLeft}       // 使用计算好的左下角
                 onLayoutChange={handlePanelUpdate}
             >
                 {/* 直接嵌入之前写的表单组件 */}
@@ -296,17 +335,21 @@ function App() {
                 onCancel={handleResumeCancel}
             />
 
-            {/* 面板 B: 任务控制与列表 (原来的 CreateMissionForm + 新的 MissionList) */}
+            {/* 面板 D
+            : 任务控制与列表 (原来的 CreateMissionForm + 新的 MissionList) */}
             {/* 我们可以把这两个合并在一个面板里用 Tab 切换，也可以分开两个面板 */}
             {/* 按照你的要求，这里作为独立的面板展示列表 */}
             <SmartPanel
                 id="history-panel"
                 title="MISSION HISTORY"
                 icon={<ListAltIcon/>}
-                initialPosition={{x: 50, y: 540}} // 放在左下位置
+                initialPosition={posBottomRight}       // 使用计算好的左下角
                 onLayoutChange={handlePanelUpdate}
             >
-                <MissionListPanel/>
+                <MissionListPanel
+                    selectedId={selectedMissionId}
+                    onSelect={handleSelectMission}
+                />
             </SmartPanel>
 
             {/* 面板 C: 飞行仪表盘 (StatusDashboard) */}
@@ -315,7 +358,7 @@ function App() {
                 id="status-panel"
                 title="TELEMETRY"
                 icon={<DashboardIcon/>}
-                initialPosition={{x: window.innerWidth - 360, y: window.innerHeight - 450}} // 右下角
+                initialPosition={posTopRight}          // 使用计算好的右上角
                 onLayoutChange={handlePanelUpdate}
             >
                 <StatusDashboard data={telemetry}/>

@@ -92,3 +92,13 @@ export const getMissionList = async (page: number = 1, size: number = 10) => {
     const query = `?page=${page}&size=${size}`;
     return request<MissionListResponse>(`/list${query}`, 'GET');
 };
+
+// 5. 获取任务的 GeoJSON 区域数据
+export const getMissionGeoJson = async (missionId: number) => {
+    // 根据你的示例直接 fetch
+    const response = await fetch(`${API_BASE}/${missionId}/geojson`);
+    if (!response.ok) {
+        throw new Error("Failed to fetch GeoJSON");
+    }
+    return response.json();
+};
